@@ -58,25 +58,6 @@ input{
     overflow:hidden;
 }
 
-.rain{
-    position:absolute;
-    top:-10vh;
-    left:var(--x);
-    font-size:var(--s);
-    opacity:var(--o);
-    animation:fall var(--d) linear infinite;
-    animation-delay:var(--delay);
-    filter:drop-shadow(0 0 5px #ff6b9d55);
-}
-
-@keyframes fall{
-    to{
-        transform:
-            translate(var(--dx),120vh)
-            rotate(360deg);
-    }
-}
-
 /* =========================================================  ESCENA FECHA  ========================================================= */
 #date{
     display:grid;
@@ -1095,7 +1076,6 @@ form{
 /* =========================================================   MENOS MOVIMIENTO   ========================================================= */
 @media (prefers-reduced-motion: reduce){
     .moon,.snoopy,.mailbox{animation:none!important}
-    .rain{animation-duration:40s!important}
 }
 </style>
 </head>
@@ -1322,15 +1302,47 @@ function show(name){
 
 /* =========================================================   LLUVIA INFINITA DE CORAZONES   ========================================================= */
 const rain = $("#rain");
-const chars = ["♥", "❤", "♡", "💗", "💖"];
-const nLluvia = liviano ? 30 : (window.innerWidth < 700 ? 45 : 90);
-for(let i = 0; i < nLluvia; i++){
-    const e = document.createElement("span");
-    e.className = "rain";
-    e.textContent = chars[Math.random() * chars.length | 0];
-    e.style.cssText = `--x:${Math.random() * 100}%; --s:${10 + Math.random() * 25}px; --o:${.12 + Math.random() * .4}; --d:${6 + Math.random() * 11}s; --delay:${-Math.random() * 16}s; --dx:${Math.random() * 100 - 50}px; `;
-    rain.appendChild(e);
-}
+(() => {
+    /* un solo canvas (antes: 45-90 elementos animados = decenas de capas de GPU, y era lo que dejaba rectángulos vacíos) */
+    const cv = document.createElement("canvas");
+    cv.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block";
+    rain.appendChild(cv);
+    const ctx = cv.getContext("2d");
+    const chars = ["♥", "❤", "♡", "💗", "💖"];
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let W = 0, H = 0;
+    const medir = () => { W = window.innerWidth; H = window.innerHeight; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); };
+    medir();
+    window.addEventListener("resize", medir);
+    const n = liviano ? 22 : (W < 700 ? 34 : 70);
+    const ps = [];
+    for(let i = 0; i < n; i++){
+        const s = 10 + Math.random() * 25, z = Math.ceil(s * 1.7 * dpr), sp = document.createElement("canvas");
+        sp.width = sp.height = z;
+        const c = sp.getContext("2d");
+        c.font = Math.round(s * dpr) + "px serif"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillStyle = "#fff";
+        c.fillText(chars[Math.random() * chars.length | 0], z / 2, z / 2);
+        ps.push({ sp, o: .12 + Math.random() * .4, d: 6 + Math.random() * 11, off: Math.random() * 16, x: Math.random(), dx: Math.random() * 100 - 50 });
+    }
+    let last = 0;
+    const dibujar = ts => {
+        requestAnimationFrame(dibujar);
+        if(document.hidden || rain.style.display === "none" || rain.style.opacity === "0" || ts - last < 33){ return; }
+        last = ts;
+        const t = ts / 1000;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        for(const p of ps){
+            const k = ((t + p.off) % p.d) / p.d;
+            ctx.globalAlpha = p.o;
+            ctx.setTransform(1, 0, 0, 1, (p.x * W + p.dx * k) * dpr, (-.1 * H + 1.2 * H * k) * dpr);
+            ctx.rotate(k * 6.2832);
+            ctx.drawImage(p.sp, -p.sp.width / 2, -p.sp.height / 2);
+        }
+        ctx.globalAlpha = 1;
+    };
+    requestAnimationFrame(dibujar);
+})();
 
 /* =========================================================   FECHA   ========================================================= */
 $("#form").onsubmit = event => {
@@ -1371,8 +1383,15 @@ $("#form").onsubmit = event => {
             .classList
             .add("lift");
     },3000);
+    /* el jardín se muestra cuando las flores ya están dibujadas (así no se ve el cambio ni se traba); espera máx. 9 s extra */
     setTimeout(() => {
-        startGarden();
+        let listo = false;
+        const lista = window.jardinListo || Promise.resolve();
+        lista.then(() => { listo = true; });
+        Promise.race([lista, new Promise(r => setTimeout(r, 9000))]).then(() => {
+            if(!listo){ window.__noSwap = true; }
+            startGarden();
+        });
     },3900);
 };
 
@@ -3071,7 +3090,6 @@ css.textContent = `
 :root{--rod:${ROD}px}
 
 /* --- rendimiento en celular --- */
-.rain{filter:none!important;will-change:transform}
 .spark,.glow i{filter:none!important}
 .reading{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:#1a0814f2!important}
 
@@ -5518,7 +5536,6 @@ mailbox.addEventListener("click", () => {
   /* 1) congelar el jardín: UNA sola clase pausa las 4 bandas, la luna y el pasto (antes se tocaban ~190 animaciones una por una = el tirón al abrir) */
   /* 2) preparar la carta mientras vuela: con opacidad casi 0 el navegador ya la dibuja, y al llegar solo hay que mostrarla */
 
-  if (scr && scr.style.opacity !== "1") scr.style.opacity = ".01";
 
   setTimeout(showGlow, 7000);                  // respaldo
 }, { once: true });
@@ -5555,12 +5572,14 @@ const TROZO   = 22;         // flores por tanda al dibujar (más bajo = menos ti
 const rnd = (a, b) => a + Math.random() * (b - a);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const bandOf = z => z <= 3 ? 0 : z <= 5 ? 1 : z <= 6 ? 2 : 3;
+let jardinOk;
+window.jardinListo = new Promise(r => { jardinOk = r; });
 
 /* ---------- CSS ---------- */
 const css = document.createElement("style");
 css.textContent = `
 .bandCv{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;
-  transform-origin:50% 100%;opacity:0;animation:bandRise 1.5s cubic-bezier(.16,.82,.2,1) var(--d,0s) both;animation-play-state:paused}
+  transform-origin:50% 100%;opacity:1;animation:bandRise 1.5s cubic-bezier(.16,.82,.2,1) var(--d,0s) backwards;animation-play-state:paused}
 #garden.active .bandCv{animation-play-state:running}
 .bandCv.sinSubida{animation:none;opacity:1}
 @keyframes bandRise{
@@ -5720,6 +5739,9 @@ async function snapshot() {
     await sleep(120);
   }
 
+  /* si el jardín ya se mostró sin esperar, no se cambia a la vista: se queda como está */
+  if (window.__noSwap) { canvases.forEach(cv => cv.remove()); return; }
+
   /* cambio: se quitan las flores SVG y se muestran los lienzos */
   const activo = garden.classList.contains("active");
   canvases.forEach(cv => { cv.style.visibility = ""; if (!activo) cv.classList.remove("sinSubida"); });
@@ -5728,19 +5750,126 @@ async function snapshot() {
     requestAnimationFrame(() => requestAnimationFrame(() => canvases.forEach(cv => { cv.style.opacity = 1; })));
     await sleep(600);
   }
-  flowers.forEach(el => el.remove());
+  for (let k = 0; k < flowers.length; k += 20) {                            // borrar por tandas (22,000 nodos de golpe tiran el celular)
+    flowers.slice(k, k + 20).forEach(el => el.remove());
+    await sleep(30);
+  }
   document.documentElement.classList.add("jardinEstatico");
 }
 
 /* arrancar cuando el loader ya terminó (mientras escribes la fecha) */
 function go() {
-  const run = () => snapshot().catch(e => { console.warn("jardín estático:", e); });
+  const run = () => snapshot().catch(e => { console.warn("jardín estático:", e); }).finally(() => jardinOk());
   (window.requestIdleCallback || (f => setTimeout(f, 300)))(() => setTimeout(run, 600));
 }
 if (app && app.classList.contains("ready")) go();
 else if (app) new MutationObserver((m, ob) => { if (app.classList.contains("ready")) { ob.disconnect(); go(); } })
   .observe(app, { attributes: true, attributeFilter: ["class"] });
 else go();
+})();
+
+/* =========================================================
+   AJUSTES FINALES (video del celular): menos capas de GPU, luna creciente realista, bandera sin animación permanente
+========================================================= */
+(() => {
+"use strict";
+const q = s => document.querySelector(s);
+
+/* ---------- CSS ---------- */
+const css = document.createElement("style");
+css.id = "ajustes-finales-css";
+css.textContent = `
+/* el zoom lento de la cámara obligaba a redibujar todo el jardín justo cuando tocas el buzón */
+.camera{transition:none!important}
+.camera.zoom{transform:none!important}
+
+/* sombra interior gigante del suelo (blur de 50px): se cambia por un degradado, mismo aspecto y mucho más barato */
+.ground{box-shadow:none!important}
+.ground::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(180deg,rgba(0,0,0,.3),rgba(0,0,0,0) 14%)}
+
+/* luna creciente: ahora es un dibujo fijo (canvas) con el halo quieto: cero repintados */
+.moon{background:none!important;box-shadow:none!important;animation:none!important}
+.moon::after{display:none!important}
+.moon::before{content:"";position:absolute;inset:-70px;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle at 64% 46%,rgba(255,232,205,.26) 0%,rgba(255,225,200,.09) 36%,transparent 64%)}
+.moon canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.moon.sinGL{-webkit-mask:radial-gradient(circle at 30% 46%,transparent 0 56%,#000 58%);mask:radial-gradient(circle at 30% 46%,transparent 0 56%,#000 58%);
+  background:radial-gradient(circle at 70% 40%,#fff6e6,#e9d6b8 60%,#bba98c)!important}
+
+/* aviso y bandera: sin animaciones infinitas (cada una era una capa de GPU viva todo el tiempo) */
+#mailbox .hint{animation:none!important;will-change:auto}
+#mailbox .mbFlagArm{animation:none}
+
+/* estrellas y cielo de la escena final: no corren hasta que se ve esa escena */
+#timeTogether:not(.show) .twStar,#timeTogether:not(.show) .skyRot,#timeTogether:not(.show) .fbCloud{animation:none!important}
+`;
+document.head.appendChild(css);
+
+/* ---------- luna creciente con la misma textura de la luna del contador ---------- */
+(function luna() {
+  const moon = q("#garden .moon");
+  const FS = window.__MOON_FS;
+  const fallo = () => { if (moon) moon.classList.add("sinGL"); };
+  if (!moon || !FS) { fallo(); return; }
+  try {
+    /* misma esfera, pero iluminada de costado y por detrás (creciente, con el lado brillante a la derecha) */
+    const fs = FS
+      .replace(/vec3 L=normalize\(mix\([^;]*\);/, "vec3 L=normalize(vec3(.94,-.14,-.30));")
+      .replace("float lit=smoothstep(-.02,.42,dot(n,L));", "float lit=smoothstep(.0,.2,dot(n,L));")
+      .replace("col+=vec3(.55,.65,.85)*alb*.035;", "col+=vec3(.55,.65,.85)*alb*.07;");
+    const size = Math.round((moon.offsetWidth || 72) * Math.min(window.devicePixelRatio || 1, 3));
+    const cvGL = document.createElement("canvas");
+    cvGL.width = cvGL.height = size;
+    const g = cvGL.getContext("webgl", { alpha: true, premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: true });
+    if (!g) { fallo(); return; }
+    const sh = (type, s) => { const x = g.createShader(type); g.shaderSource(x, s); g.compileShader(x); return g.getShaderParameter(x, g.COMPILE_STATUS) ? x : null; };
+    const vs = sh(g.VERTEX_SHADER, "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}"), fr = sh(g.FRAGMENT_SHADER, fs);
+    if (!vs || !fr) { fallo(); return; }
+    const p = g.createProgram();
+    g.attachShader(p, vs); g.attachShader(p, fr); g.linkProgram(p);
+    if (!g.getProgramParameter(p, g.LINK_STATUS)) { fallo(); return; }
+    g.useProgram(p);
+    g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
+    g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), g.STATIC_DRAW);
+    const loc = g.getAttribLocation(p, "a");
+    g.enableVertexAttribArray(loc);
+    g.vertexAttribPointer(loc, 2, g.FLOAT, false, 0, 0);
+    g.viewport(0, 0, size, size);
+    g.clearColor(0, 0, 0, 0); g.clear(g.COLOR_BUFFER_BIT);
+    g.uniform2f(g.getUniformLocation(p, "res"), size, size);
+    g.uniform1f(g.getUniformLocation(p, "t"), 14);
+    g.uniform1f(g.getUniformLocation(p, "uLit"), 0);
+    g.drawArrays(g.TRIANGLE_STRIP, 0, 4);
+    /* se copia a un canvas normal y se libera el contexto WebGL (la luna queda fija: no cuesta nada) */
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = size;
+    const c2 = cv.getContext("2d");
+    c2.drawImage(cvGL, 0, 0);
+    /* el lado en sombra se vuelve casi transparente: solo se ve la creciente */
+    const im = c2.getImageData(0, 0, size, size), d = im.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const l = (d[i] + d[i + 1] + d[i + 2]) / 3;
+      if (l < 90) d[i + 3] = Math.min(d[i + 3], Math.round(d[i + 3] * (l / 90) * .55 + 10));
+    }
+    c2.putImageData(im, 0, 0);
+    const ext = g.getExtension("WEBGL_lose_context");
+    if (ext) ext.loseContext();
+    moon.appendChild(cv);
+  } catch (e) { fallo(); }
+})();
+
+/* ---------- bandera: un meneo corto de vez en cuando (en vez de una animación infinita) ---------- */
+const arm = q("#mailbox .mbFlagArm"), box = q("#mailbox"), garden = q("#garden");
+if (arm && box && garden) {
+  setInterval(() => {
+    if (document.hidden || box.classList.contains("open") || !garden.classList.contains("active")) return;
+    arm.animate([
+      { transform: "rotate(-90deg)" }, { transform: "rotate(-84deg)", offset: .3 },
+      { transform: "rotate(-91deg)", offset: .55 }, { transform: "rotate(-87deg)", offset: .8 }, { transform: "rotate(-90deg)" }
+    ], { duration: 1000, easing: "ease-in-out" });
+  }, 6500);
+}
 })();
 
 </script>
