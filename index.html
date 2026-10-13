@@ -1478,7 +1478,7 @@ function startReadingTimer(){
     const progressBar = $("#progressBar");
     const readingText = $("#readingText");
     
-    reading.classList.add("show");
+    setTimeout(() => reading.classList.add("show"), 3200);   // espera a que el pergamino termine de abrirse
     let elapsed = 0;
     const total = CONFIG.tiempoCarta;
     const step = 1000;
@@ -3314,12 +3314,13 @@ q("#mailbox").onclick = () => {
         ], { duration: 1900, easing: "cubic-bezier(.4,.05,.25,1)", fill: "forwards" });
 
         /* el fondo pasa del jardín a la noche mientras vuela */
-        setTimeout(() => { show("open"); spawnGlowHearts(); }, 350);
+        setTimeout(() => { show("open"); }, 350);
 
         travel.onfinish = () => {
           scr.style.opacity = "1";
           fly.remove();
           tie();
+          spawnGlowHearts();                              // los corazones brillantes aparecen cuando la carta ya llegó
         };
       }, 170);
     };
@@ -3329,7 +3330,7 @@ q("#mailbox").onclick = () => {
 function spawnGlowHearts() {
   const glow = q("#glow");
   if (!glow) return;
-  const n = window.innerWidth < 700 ? 30 : 56;
+  const n = window.innerWidth < 700 ? 18 : 36;
   for (let i = 0; i < n; i++) {
     const s = document.createElement("i");
     s.textContent = "♥";
@@ -3905,93 +3906,6 @@ nextBtn.onclick = () => {
   }
   rafId = requestAnimationFrame(frame);
 };
-})();
-
-/* =========================================================
-   PARCHE DE RENDIMIENTO: CARTA SALIENDO DEL BUZÓN: 
-   Qué arregla:
-   1) El jardín (190 flores SVG meciéndose) seguía vivo debajo de toda la secuencia. Ahora se congela en cuanto tocas el buzón 
-    (las flores quedan en su pose, sin animaciones) y se quita del todo cuando la noche ya lo cubrió.
-   2) El jardín se desvanecía a la vez que la noche aparecía: dos pantallas enormes mezclándose cuadro a cuadro. Ahora se queda quieto debajo, la noche aparece encima y el jardín desaparece de golpe al terminar.
-   3) Los corazones brillantes de la carta (56 animados) aparecían justo en pleno vuelo. Ahora aparecen cuando la carta ya llegó, y son menos.
-   4) Había un pergamino duplicado (de un bloque anterior) invisible en pantalla pero ocupando espacio y capas: se elimina.
-   5) La lluvia de corazones es más corta en celular.
-   6) El moño ya no lleva sombra con filtro (se repintaba en cada cuadro mientras se balancean las colas).
-========================================================= */
-(() => {
-"use strict";
-
-const q = s => document.querySelector(s);
-const mailbox = q("#mailbox"), garden = q("#garden"), glow = q("#glow"), rain = q("#rain"), letter = q("#letter");
-if (!mailbox || !garden) return;
-const chica = window.innerWidth < 700;
-
-/* ====== AJUSTES FÁCILES ====== */
-const BRILLOS_MAX = chica ? 18 : 36;   // corazones brillantes alrededor de la carta
-/* ============================== */
-
-/* ---------- CSS ---------- */
-const css = document.createElement("style");
-css.id = "buzon-ligero-css";
-css.textContent = `
-/* el jardín se queda debajo mientras la noche aparece encima, y se va de golpe al final */
-#garden.active{transition:opacity 1.2s ease}
-#garden:not(.active){transition:opacity 0s linear 1.3s}
-#garden.congelado #flowers .botanical,#garden.congelado .moon{animation-play-state:paused!important}
-#garden.fuera{display:none!important}
-/* corazones brillantes: esperan a que la carta llegue */
-#glow.espera{display:none}
-#glow i{will-change:transform,opacity}
-/* el moño sin filtro (era lo que más se repintaba mientras esperas) */
-.bow{filter:none!important}
-`;
-document.head.appendChild(css);
-
-
-/* 3) corazones brillantes: menos, y solo cuando la carta ya llegó */
-const scr = letter && letter.closest(".scr");
-let glowOn = false;
-function showGlow() {
-  if (glowOn || !glow) return;
-  glowOn = true;
-  glow.classList.remove("espera");
-  glow.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 900, easing: "ease-out" });
-}
-
-if (glow) {
-  glow.classList.add("espera");
-  new MutationObserver(() => {
-    while (glow.children.length > BRILLOS_MAX) glow.lastElementChild.remove();
-  }).observe(glow, { childList: true });
-}
-
-/* tu código pone opacity:1 al pergamino cuando termina de volar: esa es la señal */
-if (scr) new MutationObserver(() => { if (scr.style.opacity === "1") showGlow(); })
-  .observe(scr, { attributes: true, attributeFilter: ["style"] });
-
-/* 4) al tocar el buzón: congelar el jardín. Las flores quedan exactamente en la pose en que estaban, pero ya SIN animaciones:
-      así el navegador libera las ~190 capas animadas que tenía vivas. (Solo pausarlas no bastaba: seguían ocupando capas.) */
-mailbox.addEventListener("click", () => {
-  garden.classList.add("congelado");     // respaldo: al menos pausa
-  try {
-    const anims = garden.getAnimations({ subtree: true }).filter(a => {
-      const t = a.effect && a.effect.target;
-      return t && t.closest && t.closest("#flowers");
-    });
-
-    anims.forEach(a => a.commitStyles());   // primero se guarda la pose de todas…
-    anims.forEach(a => a.cancel());         // …y luego se quitan (así no se recalcula una por una)
-  } catch (e) { /* si el navegador no lo soporta, queda la pausa */ }
-  setTimeout(showGlow, 7000);            // respaldo
-}, { once: true });
-
-/* 5) quitar el jardín del todo cuando ya no se ve */
-new MutationObserver(() => {
-  if (garden.classList.contains("active") || garden.classList.contains("fuera")) return;
-  setTimeout(() => {
-    if (!garden.classList.contains("active")) garden.classList.add("fuera");
-  }, 1500);
-}).observe(garden, { attributes: true, attributeFilter: ["class"] });
 })();
 
 /* =========================================================
@@ -5221,70 +5135,56 @@ try { showSecretReveal = window.showSecretReveal; } catch (e) { /* nada */ }
 })();
 
 /* =========================================================
-   BUZÓN REALISTA + RENDIMIENTO (v2) POR QUÉ SE TRABABA Y SE "CORROMPÍA" EN EL CELULAR (lo medí):
-   Tu jardín son ~190 flores SVG = unos 22,000 nodos, y cada flor tenía DOS capas animadas (.flower y .botanical, esta última meciéndose sola). Eso son ~380 capas de GPU. Un celular no tiene memoria gráfica para tantas: el
-   navegador tira capas y se ve basura o desaparecen piezas (la puerta y la bandera del buzón), y cada cambio de escena se siente a tirones. Medido en celular emulado con CPU 4x más lenta: jardín en reposo 310 ms por cuadro con el vaivén de cada flor, 124 ms sin él, 17 ms sin flores.
-   QUÉ HACE ESTE BLOQUE:
-   1) Las flores se agrupan en 4 bandas por profundidad y se mecen POR BANDA (4 capas en vez de ~380). Se ve igual de vivo: cada banda va a su ritmo.
-   2) La puerta del buzón ya no usa 3D (rotateX/perspective), que en varios celulares falla. Ahora es 2D con perspectiva falsa (la puerta cae hacia ti y se ve su cara interior). Mismo efecto, cero riesgo.
-   3) Al abrir el buzón ya no se tocan las flores una por una: se pausa el vaivén con una sola clase. Y el jardín no se destruye al final (eso tardaba 2 s en equipo lento): se oculta con content-visibility.
-   4) Moon: el brillo ya no anima box-shadow (repintaba todo el rato).
-   5) La carta se prepara mientras vuela; barra de lectura y música esperan a que termine de abrirse; corazones brillantes después de que llegue.
-   6) Arreglo del tipeo "x@keyframes mbGlow" de tu CSS (la luz del buzón nunca se animaba): aquí va con otro nombre y funciona.
+   JARDÍN + BUZÓN (versión limpia, reemplaza los 3 parches anteriores)
+   Reemplaza: "PARCHE DE RENDIMIENTO: CARTA SALIENDO DEL BUZÓN", "BUZÓN REALISTA + RENDIMIENTO (v2)" y "JARDÍN ESTÁTICO".
+
+   Idea: el jardín se dibuja UNA sola vez (flores + pasto) en un lienzo, se guarda como UNA imagen comprimida y se muestra en UNA sola capa
+   sin animaciones permanentes. Antes eran 4 lienzos grandes animados (rotaban todo el tiempo): en el celular el sistema les quitaba memoria
+   de video al tocar la pantalla y las flores "desaparecían". Una imagen se puede volver a decodificar sola, así que ya no se pierde.
+   - El buzón (SVG) queda centrado.
+   - Sin MutationObservers ni monkeypatches: lo que antes se parchaba ahora está corregido en el sitio donde ocurre.
 ========================================================= */
 (() => {
 "use strict";
 
 const q = s => document.querySelector(s);
-const mailbox = q("#mailbox"), garden = q("#garden"), glow = q("#glow");
-const letter = q("#letter"), reading = q("#reading");
-if (!mailbox || !garden) return;
-const chica = window.innerWidth < 700;
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const mailbox = q("#mailbox"), garden = q("#garden"), box = q("#flowers"), app = q("#app"), date = q("#date");
+if (!mailbox || !garden || !box) return;
 
-/* ====== AJUSTES FÁCILES ====== */
-const BRILLOS_MAX     = chica ? 18 : 36;   // corazones brillantes alrededor de la carta
-const RETRASO_LECTURA = 3200;              // ms: la barra de lectura y la música esperan a que el pergamino termine de abrirse
-const REACCION_FLORES = true;              // las flores se inclinan con el dedo / mouse
-/* ============================== */
+/* ====== AJUSTES ====== */
+const DPR_MAX = 2;          // nitidez del jardín (2 basta; más gasta memoria)
+const TROZO   = 22;         // flores por tanda al dibujar
+const BUZON_X = -22;        // px: mueve el buzón (negativo = izquierda)
+/* ===================== */
 
-/* ---------------------------------------------------------   CSS   --------------------------------------------------------- */
-const css = document.createElement("style");
-css.id = "buzon-realista-css";
-css.textContent = `
-/* ===== jardín: debajo mientras la noche aparece, y se va de golpe al final ===== */
+const rnd = (a, b) => a + Math.random() * (b - a);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const bandOf = z => z <= 3 ? 0 : z <= 5 ? 1 : z <= 6 ? 2 : 3;
+let jardinOk;
+window.jardinListo = new Promise(r => { jardinOk = r; });
+
+/* ---------------------------------------------------------   CSS general   --------------------------------------------------------- */
+const css0 = document.createElement("style");
+css0.id = "jardin-limpio-css";
+css0.textContent = `
+/* el jardín se queda debajo mientras la noche aparece encima, y se quita de golpe al final */
 #garden.active{transition:opacity 1.2s ease}
 #garden:not(.active){transition:opacity 0s linear 1.3s}
-@supports (content-visibility:hidden){#garden.fuera{content-visibility:hidden}}
-@supports not (content-visibility:hidden){#garden.fuera{display:none!important}}
-#garden.congelado .moon::after{animation-play-state:paused}
-
-/* ===== luna: el brillo ya no anima box-shadow (era lo más caro del jardín) ===== */
-.moon{animation:none!important}
-.moon::after{content:"";position:absolute;inset:-70px;border-radius:50%;pointer-events:none;
-  background:radial-gradient(circle,rgba(255,225,200,.2) 0%,rgba(255,225,200,.07) 45%,transparent 68%);
-  animation:moonPulseB 4s ease-in-out infinite}
-@keyframes moonPulseB{0%,100%{opacity:.55}50%{opacity:1}}
-
-/* ===== flores: 4 bandas por profundidad, cada una se mece sola (antes: ~190 capas animadas) ===== */
-.flBand{position:absolute;inset:0;transform-origin:50% 100%;isolation:isolate;pointer-events:none;animation-play-state:paused}
-#garden.active .flBand{animation-play-state:running}
-#garden.congelado .flBand{animation-play-state:paused!important}
-.flBand0{animation:bandA 7.3s ease-in-out infinite alternate}
-.flBand1{animation:bandB 6.1s ease-in-out -2s infinite alternate}
-.flBand2{animation:bandC 5.2s ease-in-out -1s infinite alternate}
-.flBand3{animation:bandD 4.4s ease-in-out -3s infinite alternate}
-@keyframes bandA{from{transform:rotate(-.30deg)}to{transform:rotate(.36deg) translateX(1px)}}
-@keyframes bandB{from{transform:rotate(.28deg) translateX(-1px)}to{transform:rotate(-.34deg)}}
-@keyframes bandC{from{transform:rotate(-.38deg)}to{transform:rotate(.42deg) translateX(1.5px)}}
-@keyframes bandD{from{transform:rotate(.42deg) translateX(-1.5px)}to{transform:rotate(-.46deg)}}
-#flowers .botanical{animation:none!important}
-#flowers .flower svg{transform-origin:50% 100%;transition:transform .35s ease-out}
-
-/* ===== corazones brillantes: esperan a que la carta llegue ===== */
-#glow.espera{display:none}
+#garden.fuera{display:none!important}
+/* el jardín: una sola imagen, una sola capa */
+#flowers .flImg{position:absolute;left:0;top:0;width:100%;height:100%;display:block;pointer-events:none;user-select:none;-webkit-user-drag:none;
+  transform-origin:50% 100%;animation:flRise 1.5s cubic-bezier(.16,.82,.2,1) backwards;animation-play-state:paused}
+#garden.active #flowers .flImg{animation-play-state:running}
+#flowers .flImg.quieto{animation:none}
+@keyframes flRise{0%{opacity:0;transform:translateY(40px) scale(.97,.8)}60%{opacity:1;transform:translateY(-5px) scale(1.005)}100%{opacity:1;transform:none}}
 .bow{filter:none!important}
+#mailbox.mailbox{left:${BUZON_X}px}
+`;
+document.head.appendChild(css0);
 
+const css1 = document.createElement("style");
+css1.id = "buzon-css";
+css1.textContent = `
 /* =====================================================================
    BUZÓN
    ===================================================================== */
@@ -5369,7 +5269,7 @@ css.textContent = `
 #mailbox .hint::after{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-7px;border:7px solid transparent;
   border-top-color:#190816dd;border-bottom:0}
 `;
-document.head.appendChild(css);
+document.head.appendChild(css1);
 
 /* ---------------------------------------------------------   dibujo del buzón (SVG estático)   --------------------------------------------------------- */
 function buildMailbox() {
@@ -5447,159 +5347,20 @@ function installMailbox() {
 
 installMailbox();
 
-/* ---------------------------------------------------------   corazones brillantes: esperan a la carta   --------------------------------------------------------- */
-const scr = letter && letter.closest(".scr");
-let glowOn = false;
-function showGlow() {
-  if (glowOn || !glow) return;
-  glowOn = true;
-  glow.classList.remove("espera");
-  glow.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 900, easing: "ease-out" });
-}
-
-if (glow) {
-  glow.classList.add("espera");
-  new MutationObserver(() => { while (glow.children.length > BRILLOS_MAX) glow.lastElementChild.remove(); })
-    .observe(glow, { childList: true });
-}
-
-/* tu código pone opacity:1 al pergamino cuando termina de volar: esa es la señal */
-if (scr) new MutationObserver(() => { if (scr.style.opacity === "1") showGlow(); })
-  .observe(scr, { attributes: true, attributeFilter: ["style"] });
-
-/* ---------------------------------------------------------   la barra de lectura y la música esperan al pergamino   --------------------------------------------------------- */
-if (reading && RETRASO_LECTURA > 0) {
-  const nativeAdd = DOMTokenList.prototype.add;
-  reading.classList.add = function (...tokens) {
-    if (tokens.indexOf("show") >= 0 && !reading.classList.contains("show")) {
-      setTimeout(() => nativeAdd.apply(reading.classList, tokens), RETRASO_LECTURA);
-      return;
-    }
-    return nativeAdd.apply(this, tokens);
-  };
-}
-
-/* ---------------------------------------------------------   jardín: las flores se inclinan con el dedo   --------------------------------------------------------- */
-let items = null, lastX = 0, lastY = 0, rafId = 0, resetT = 0;
-function measure() {
-  items = [...garden.querySelectorAll("#flowers .flower")].map(fl => {
-    const r = fl.getBoundingClientRect(), s = fl.querySelector("svg");
-    return s ? { s, x: r.left + r.width / 2, y: r.top + r.height / 2, on: false } : null;
-  }).filter(Boolean);
-}
-
-function flushReact() {
-  rafId = 0;
-  if (!items) measure();
-  for (const it of items) {                     // solo lee números ya guardados y escribe: sin forzar layout
-    const dx = lastX - it.x, dy = lastY - it.y, d = Math.hypot(dx, dy);
-    if (d < 190) { const k = 1 - d / 190; it.s.style.transform = `rotate(${clamp(dx * .03 * k, -9, 9)}deg)`; it.on = true; }
-    else if (it.on) { it.s.style.transform = ""; it.on = false; }
-  }
-  clearTimeout(resetT);
-  resetT = setTimeout(() => { if (items) for (const it of items) if (it.on) { it.s.style.transform = ""; it.on = false; } }, 520);
-}
-const poke = (x, y) => { lastX = x; lastY = y; if (!rafId) rafId = requestAnimationFrame(flushReact); };
-window.addEventListener("resize", () => { items = null; });
-
-if (REACCION_FLORES && typeof window.startGarden === "function") {
-  const origStart = window.startGarden;
-  window.startGarden = function () {
-    const r = origStart.apply(this, arguments);
-    items = null;
-    garden.onmousemove = e => poke(e.clientX, e.clientY);
-    garden.ontouchmove = e => { const t = e.touches[0]; if (t) poke(t.clientX, t.clientY); };
-    return r;
-  };
-}
-
-/* ---------------------------------------------------------   flores en 4 bandas por profundidad   --------------------------------------------------------- */
-function buildBands() {
-  const box = q("#flowers");
-  if (!box || box.dataset.bands) return;
-  box.dataset.bands = "1";
-  const flowers = [...box.children].filter(el => el.classList.contains("flower"));
-  if (!flowers.length) return;
-  const bands = [0, 1, 2, 3].map(i => { const d = document.createElement("div"); d.className = "flBand flBand" + i; d.style.zIndex = [2, 4, 6, 7][i]; return d; });
-  const bandOf = z => z <= 3 ? 0 : z <= 5 ? 1 : z <= 6 ? 2 : 3;
-  flowers.forEach(el => bands[bandOf(parseInt(el.style.zIndex, 10) || 4)].appendChild(el));
-  bands.forEach(b => box.appendChild(b));
-}
-buildBands();
-
-/* ---------------------------------------------------------   al tocar el buzón   --------------------------------------------------------- */
-mailbox.addEventListener("click", () => {
-  garden.classList.add("congelado");
-  garden.onmousemove = garden.ontouchmove = null;
-  clearTimeout(resetT);
-
-  /* 1) congelar el jardín: UNA sola clase pausa las 4 bandas, la luna y el pasto (antes se tocaban ~190 animaciones una por una = el tirón al abrir) */
-  /* 2) preparar la carta mientras vuela: con opacidad casi 0 el navegador ya la dibuja, y al llegar solo hay que mostrarla */
-
-
-  setTimeout(showGlow, 7000);                  // respaldo
-}, { once: true });
-
-/* quitar el jardín del todo cuando ya no se ve */
-new MutationObserver(() => {
-  if (garden.classList.contains("active") || garden.classList.contains("fuera")) return;
-  setTimeout(() => { if (!garden.classList.contains("active")) garden.classList.add("fuera"); }, 1500);
-}).observe(garden, { attributes: true, attributeFilter: ["class"] });
-})();
-
-/* =========================================================
-   JARDÍN ESTÁTICO (arregla: se traba al salir la carta, flores corridas, pasto): 
-   QUÉ HACE
-   1) Cuando el loader termina (mientras escribes la fecha), dibuja las ~190 flores UNA sola vez en 4 lienzos (canvas) y borra los ~22,000 nodos SVG.
-      Era lo que ahogaba al celular: cada cambio de escena y cada cuadro de la carta peleaba contra ese jardín.
-   2) Las flores se colocan por su CENTRO (antes por su borde izquierdo, por eso el ramo se veía corrido a la derecha).
-   3) Pasto realista dibujado en el mismo paso: campo oscuro al fondo y una franja de pasto delante de cada banda de flores, así los tallos nacen
-      de la hierba y no flotan. La profundidad se nota (más lejos = más chico y oscuro).
-   4) La escena de la fecha (≈5,000 nodos con 100 animaciones) se oculta del todo cuando empieza el jardín: seguía corriendo invisible.
-========================================================= */
-(() => {
-"use strict";
-
-const q = s => document.querySelector(s);
-const box = q("#flowers"), garden = q("#garden"), app = q("#app");
-if (!box || !garden) return;
-
-/* ====== AJUSTES ====== */
-const DPR_MAX = 2;          // nitidez de los lienzos (2 es suficiente y ahorra memoria)
-const TROZO   = 22;         // flores por tanda al dibujar (más bajo = menos tirones al dibujar)
-/* ===================== */
-
-const rnd = (a, b) => a + Math.random() * (b - a);
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const bandOf = z => z <= 3 ? 0 : z <= 5 ? 1 : z <= 6 ? 2 : 3;
-let jardinOk;
-window.jardinListo = new Promise(r => { jardinOk = r; });
-
-/* ---------- CSS ---------- */
-const css = document.createElement("style");
-css.textContent = `
-.bandCv{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;
-  transform-origin:50% 100%;opacity:1;animation:bandRise 1.5s cubic-bezier(.16,.82,.2,1) var(--d,0s) backwards;animation-play-state:paused}
-#garden.active .bandCv{animation-play-state:running}
-.bandCv.sinSubida{animation:none;opacity:1}
-@keyframes bandRise{
-  0%{opacity:0;transform:translateY(46px) scale(.96,.7)}
-  58%{opacity:1;transform:translateY(-6px) scale(1.008,.994)}
-  80%{transform:translateY(1px) scale(.998,1.002)}
-  100%{opacity:1;transform:none}}
-`;
-document.head.appendChild(css);
-
-/* ---------- 4) la escena de la fecha se quita del todo cuando empieza el jardín ---------- */
-const date = q("#date");
+/* ---------------------------------------------------------   la escena de la fecha se quita cuando empieza el jardín   --------------------------------------------------------- */
 if (date) new MutationObserver(() => {
   if (date.classList.contains("active")) return;
   setTimeout(() => { if (!date.classList.contains("active")) date.style.display = "none"; }, 1700);
 }).observe(date, { attributes: true, attributeFilter: ["class"] });
 
-/* ---------- pasto ---------- */
+/* el jardín se quita del todo cuando la noche ya lo cubrió */
+new MutationObserver(() => {
+  if (garden.classList.contains("active") || garden.classList.contains("fuera")) return;
+  setTimeout(() => { if (!garden.classList.contains("active")) garden.classList.add("fuera"); }, 1500);
+}).observe(garden, { attributes: true, attributeFilter: ["class"] });
+
+/* ---------------------------------------------------------   pasto   --------------------------------------------------------- */
 function makeGrass(ctx, dpr, W, H) {
-  /* un degradado por variante de color (en espacio unitario: base en 0, punta en -1) */
   const variants = tone => {
     const hues = [112, 118, 124, 130, 136, 100, 88, 52];
     return hues.map(h => {
@@ -5627,10 +5388,8 @@ function makeGrass(ctx, dpr, W, H) {
     ctx.fill();
   }
 
-  /* franja de pasto: macollas (varias hojas desde casi el mismo punto) entre y0 y y1 */
   function strip(y0, y1, o) {
     const g = variants(o.tone);
-    /* sombra de tierra bajo el pasto: oscurece la base de los tallos */
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const sh = ctx.createLinearGradient(0, y0 - 6, 0, y1);
     sh.addColorStop(0, "rgba(2,14,6,0)"); sh.addColorStop(1, `rgba(2,14,6,${o.shade})`);
@@ -5638,7 +5397,7 @@ function makeGrass(ctx, dpr, W, H) {
     const n = Math.round(W * (y1 - y0) / o.cell);
     const tufts = [];
     for (let i = 0; i < n / 4; i++) tufts.push({ x: rnd(-8, W + 8), y: rnd(y0, y1), lean: rnd(-1, 1), k: rnd(.75, 1.25) });
-    tufts.sort((a, b) => a.y - b.y);                                  // lo lejano primero
+    tufts.sort((a, b) => a.y - b.y);
     for (const t of tufts) {
       const m = 3 + (Math.random() * 4 | 0);
       for (let j = 0; j < m; j++) {
@@ -5653,7 +5412,7 @@ function makeGrass(ctx, dpr, W, H) {
   return { strip };
 }
 
-/* ---------- el trabajo ---------- */
+/* ---------------------------------------------------------   dibujar el jardín una sola vez   --------------------------------------------------------- */
 async function snapshot() {
   const W = box.offsetWidth, H = box.offsetHeight;
   if (!W || !H) return;
@@ -5661,13 +5420,6 @@ async function snapshot() {
   if (flowers.length < 20) return;
   const dpr = Math.min(window.devicePixelRatio || 1, DPR_MAX);
 
-  /* bandas: las que creó el bloque anterior (o se crean aquí) */
-  let bands = [...box.querySelectorAll(".flBand")];
-  if (bands.length !== 4) {
-    bands = [0, 1, 2, 3].map(i => { const d = document.createElement("div"); d.className = "flBand flBand" + i; d.style.zIndex = [2, 4, 6, 7][i]; box.appendChild(d); return d; });
-  }
-
-  /* datos de cada flor (posición, tamaño, inclinación y su dibujo) */
   const num = (el, n) => parseFloat(el.style.getPropertyValue(n));
   const data = flowers.map((el, i) => {
     const z = parseInt(el.style.zIndex, 10) || 4;
@@ -5675,13 +5427,13 @@ async function snapshot() {
              lean: num(el, "--lean") || 0, svg: el.querySelector("svg") };
   }).filter(d => d.svg && isFinite(d.x + d.b + d.w + d.h));
 
-  const shared = (document.getElementById("shd") || {}).parentNode;           // degradados compartidos (#shd, #disc, #dcen)
+  const shared = (document.getElementById("shd") || {}).parentNode;           // degradados compartidos
   const SHARED = shared ? shared.innerHTML : "";
 
   const chunkSvg = items => {
     let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${SHARED}</defs>`;
     for (const d of items) {
-      const left = d.x / 100 * W - d.w / 2;                                   // por el CENTRO
+      const left = d.x / 100 * W - d.w / 2;                                   // se coloca por el CENTRO de la flor
       const top = H - d.b / 100 * H - d.h;
       const vb = d.h / d.w * 100;
       s += `<g transform="rotate(${d.lean.toFixed(2)} ${(left + d.w / 2).toFixed(1)} ${(top + d.h).toFixed(1)})">`
@@ -5690,16 +5442,20 @@ async function snapshot() {
     return s + "</svg>";
   };
 
-  const draw = async (ctx, cvW, cvH, items) => {
+  const cv = document.createElement("canvas");                                // fuera de la página: no ocupa capa
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const ctx = cv.getContext("2d");
+
+  const draw = async items => {
     const url = URL.createObjectURL(new Blob([chunkSvg(items)], { type: "image/svg+xml" }));
     try {
       const img = new Image(); img.src = url; await img.decode();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(img, 0, 0, cvW, cvH);
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
     } finally { URL.revokeObjectURL(url); }
   };
 
-  /* rangos de profundidad de cada banda (en % desde abajo, según cómo se generan las flores) */
+  /* profundidad de cada banda (en % desde abajo) y su pasto */
   const RANGOS = [[30.3, 43], [17.7, 30.3], [11.3, 17.7], [0, 11.3]];
   const PASTO = [
     { tone: .62, shade: .35, cell: 60,  h: [10, 30],  w: [1.6, 2.8] },
@@ -5709,57 +5465,55 @@ async function snapshot() {
   ];
   const ground = q(".ground");
   const gTop = ground ? ground.offsetTop : H * .55;
-
-  const canvases = bands.map((band, bi) => {
-    const cv = document.createElement("canvas");
-    cv.className = "bandCv sinSubida";
-    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
-    cv.style.setProperty("--d", (bi * .3) + "s");
-    cv.style.visibility = "hidden";
-    band.appendChild(cv);
-    return cv;
-  });
+  const grass = makeGrass(ctx, cv.width / W, W, H);
 
   for (let bi = 0; bi < 4; bi++) {
-    const cv = canvases[bi], ctx = cv.getContext("2d");
-    const grass = makeGrass(ctx, cv.width / W, W, H);
-    if (bi === 0) {                                                        // campo lejano, detrás de todo
-      grass.strip(gTop - 8, H * (1 - .43) + 14, { tone: .45, shade: .3, cell: 38, h: [6, 18], w: [1.2, 2.0] });
-    }
+    if (bi === 0) grass.strip(gTop - 8, H * (1 - .43) + 14, { tone: .45, shade: .3, cell: 38, h: [6, 18], w: [1.2, 2.0] });   // campo lejano
     const items = data.filter(d => d.band === bi).sort((a, b) => a.z - b.z || a.i - b.i);
     for (let k = 0; k < items.length; k += TROZO) {
-      await draw(ctx, cv.width, cv.height, items.slice(k, k + TROZO));
-      await sleep(180);                                                    // deja respirar a la pantalla
+      await draw(items.slice(k, k + TROZO));
+      await sleep(120);                                                       // deja respirar a la pantalla
     }
-    /* pasto delante de las flores de esta banda: ahí "nacen" sus tallos */
     const [bMin, bMax] = RANGOS[bi];
     const y0 = H * (1 - bMax / 100) - 10;
     const y1 = bi === 3 ? H + 12 : H * (1 - bMin / 100) + 16;
-    grass.strip(y0, y1, PASTO[bi]);
-    await sleep(120);
+    grass.strip(y0, y1, PASTO[bi]);                                           // aquí "nacen" los tallos de esta banda
+    await sleep(80);
   }
 
-  /* si el jardín ya se mostró sin esperar, no se cambia a la vista: se queda como está */
-  if (window.__noSwap) { canvases.forEach(cv => cv.remove()); return; }
+  /* si el jardín ya se mostró sin esperar, se deja como está */
+  if (window.__noSwap) return;
 
-  /* cambio: se quitan las flores SVG y se muestran los lienzos */
+  /* a UNA imagen comprimida: el navegador la puede tirar y volver a decodificar sola, un lienzo no */
+  let el;
+  try {
+    const blob = await new Promise(r => cv.toBlob(r, "image/webp", .92));
+    if (!blob) throw 0;
+    const img = new Image();
+    img.className = "flImg"; img.alt = ""; img.draggable = false; img.decoding = "async";
+    img.src = URL.createObjectURL(blob);                                      // no se revoca: hace falta para volver a decodificar
+    await img.decode();
+    el = img;
+    cv.width = cv.height = 0;                                                 // libera el lienzo
+  } catch (e) {
+    cv.className = "flImg"; el = cv;                                          // respaldo: el lienzo mismo
+  }
+
   const activo = garden.classList.contains("active");
-  canvases.forEach(cv => { cv.style.visibility = ""; if (!activo) cv.classList.remove("sinSubida"); });
-  if (activo) {                                                             // el jardín ya se estaba viendo: fundido corto
-    canvases.forEach(cv => { cv.style.opacity = 0; cv.style.transition = "opacity .5s"; });
-    requestAnimationFrame(() => requestAnimationFrame(() => canvases.forEach(cv => { cv.style.opacity = 1; })));
-    await sleep(600);
-  }
-  for (let k = 0; k < flowers.length; k += 20) {                            // borrar por tandas (22,000 nodos de golpe tiran el celular)
-    flowers.slice(k, k + 20).forEach(el => el.remove());
+  if (activo) { el.classList.add("quieto"); el.style.opacity = 0; el.style.transition = "opacity .5s"; }
+  else el.addEventListener("animationend", () => el.classList.add("quieto"), { once: true });
+  box.appendChild(el);
+  if (activo) { requestAnimationFrame(() => requestAnimationFrame(() => { el.style.opacity = 1; })); await sleep(600); }
+
+  for (let k = 0; k < flowers.length; k += 20) {                              // borrar las flores SVG por tandas
+    flowers.slice(k, k + 20).forEach(f => f.remove());
     await sleep(30);
   }
   document.documentElement.classList.add("jardinEstatico");
 }
 
-/* arrancar cuando el loader ya terminó (mientras escribes la fecha) */
 function go() {
-  const run = () => snapshot().catch(e => { console.warn("jardín estático:", e); }).finally(() => jardinOk());
+  const run = () => snapshot().catch(e => { console.warn("jardín:", e); }).finally(() => jardinOk());
   (window.requestIdleCallback || (f => setTimeout(f, 300)))(() => setTimeout(run, 600));
 }
 if (app && app.classList.contains("ready")) go();
@@ -5767,6 +5521,7 @@ else if (app) new MutationObserver((m, ob) => { if (app.classList.contains("read
   .observe(app, { attributes: true, attributeFilter: ["class"] });
 else go();
 })();
+
 
 /* =========================================================
    AJUSTES FINALES (video del celular): menos capas de GPU, luna creciente realista, bandera sin animación permanente
